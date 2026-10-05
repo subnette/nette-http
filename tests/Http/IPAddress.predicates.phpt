@@ -102,6 +102,27 @@ test('IPv4-mapped IPv6 evaluates as the embedded IPv4', function () {
 });
 
 
+test('only IPv4-mapped IPv6 normalizes for classification', function () {
+	foreach ([
+		'isPrivate' => '10.1.2.3',
+		'isLoopback' => '127.0.0.1',
+		'isLinkLocal' => '169.254.169.254',
+		'isMulticast' => '224.0.0.1',
+		'isReserved' => '192.0.2.1',
+	] as $method => $address) {
+		$mapped = new IPAddress('::ffff:' . $address);
+		Assert::true($mapped->$method());
+		Assert::false($mapped->isPublic());
+		foreach (['::', '::fffe:', '::1:ffff:'] as $prefix) {
+			$ip = new IPAddress($prefix . $address);
+			Assert::false($ip->$method());
+			Assert::true($ip->isPublic());
+		}
+	}
+	Assert::true((new IPAddress('::ffff:a01:203'))->isPrivate());
+});
+
+
 test('predicates are mutually exclusive for non-overlapping ranges', function () {
 	$publicIp = new IPAddress('1.1.1.1');
 	Assert::true($publicIp->isPublic());

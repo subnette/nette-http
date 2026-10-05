@@ -226,9 +226,40 @@ final readonly class IPAddress implements \Stringable
 	/** @param  string[]  $ranges */
 	private function matchesAny(array $ranges): bool
 	{
-		foreach ($ranges as $cidr) {
-			if ($this->isInRange($cidr)) {
-				return true;
+		// Only the five fixed range lists reach here; arbitrary isInRange() calls are not cached.
+		static $compiled = [];
+		$key = $ranges[0];
+		if (!isset($compiled[$key])) {
+			$compiled[$key] = [];
+			foreach ($ranges as $cidr) {
+				[$network, $prefix] = explode('/', $cidr, 2);
+				$networkBin = inet_pton($network);
+				if ($networkBin === false) {
+					continue;
+				}
+				$prefix = (int) $prefix;
+				$remainBits = $prefix % 8;
+				$compiled[$key][strlen($networkBin)][] = [
+					$networkBin,
+					intdiv($prefix, 8),
+					$remainBits ? chr((0xFF << (8 - $remainBits)) & 0xFF) : null,
+				];
+			}
+		}
+
+		foreach ($compiled[$key] as $length => $networks) {
+			$selfBin = $length === 4 && $this->isIPv4Mapped()
+				? substr($this->binary, 12)
+				: $this->binary;
+			if (strlen($selfBin) !== $length) {
+				continue;
+			}
+			foreach ($networks as [$networkBin, $fullBytes, $mask]) {
+				if (strncmp($selfBin, $networkBin, $fullBytes) === 0
+					&& ($mask === null || ($selfBin[$fullBytes] & $mask) === ($networkBin[$fullBytes] & $mask))
+				) {
+					return true;
+				}
 			}
 		}
 		return false;
