@@ -440,8 +440,19 @@ class Url implements \JsonSerializable
 	 */
 	public static function parseQuery(string $s): array
 	{
+		if ($s === '') {
+			return [];
+		}
+
+		$argSep = ini_get('arg_separator.input') ?: '&';
+		if ($argSep === '&' && strspn($s, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-=&') === strlen($s)) {
+			// fast path: keys without dots, spaces, brackets or escapes are parsed by parse_str() verbatim
+			parse_str($s, $res);
+			return $res;
+		}
+
 		$s = str_replace(['%5B', '%5b'], '[', $s);
-		$sep = preg_quote(ini_get('arg_separator.input') ?: '&');
+		$sep = preg_quote($argSep);
 		$s = preg_replace("#([$sep])([^[$sep=]+)([^$sep]*)#", '&0[$2]$3', '&' . $s) ?? throw new \LogicException;
 		parse_str($s, $res);
 		return (array) ($res[0] ?? []);

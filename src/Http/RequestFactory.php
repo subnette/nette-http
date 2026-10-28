@@ -20,6 +20,9 @@ use const PHP_SAPI;
 class RequestFactory
 {
 	/** @internal */
+	private const AsciiPrintable = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\t\n\r";
+
+	/** @internal */
 	private const ValidChars = '\x09\x0A\x0D\x20-\x7E\xA0-\x{10FFFF}';
 
 	/**
@@ -151,12 +154,23 @@ class RequestFactory
 	private function getPathAndQuery(Url $url): void
 	{
 		$requestUrl = $_SERVER['REQUEST_URI'] ?? '/';
-		$requestUrl = preg_replace('#^\w++://[^/]++#', '', $requestUrl);
-		$requestUrl = Strings::replace($requestUrl, $this->urlFilters['url']);
+		if (($requestUrl[0] ?? '/') !== '/') { // absolute-form request target (rare)
+			$requestUrl = preg_replace('#^\w++://[^/]++#', '', $requestUrl);
+		}
+
+		if ($this->urlFilters['url']) {
+			$requestUrl = Strings::replace($requestUrl, $this->urlFilters['url']);
+		}
 
 		$tmp = explode('?', $requestUrl, 2);
-		$path = Url::unescape($tmp[0], '%/?#');
-		$path = Strings::fixEncoding(Strings::replace($path, $this->urlFilters['path']));
+		$path = str_contains($tmp[0], '%') ? Url::unescape($tmp[0], '%/?#') : $tmp[0];
+		if ($this->urlFilters['path'] !== ['#//#' => '/']) {
+			$path = Strings::replace($path, $this->urlFilters['path']);
+		} elseif (str_contains($path, '//')) {
+			$path = preg_replace('#//#', '/', $path);
+		}
+
+		$path = Strings::fixEncoding($path);
 		$url->setPath($path);
 		$url->setQuery($tmp[1] ?? '');
 	}
@@ -190,39 +204,56 @@ class RequestFactory
 
 		$query = $url->getQueryParameters();
 		$post = $useFilter
-			? filter_input_array(INPUT_POST, FILTER_UNSAFE_RAW)
+			? (filter_input_array(INPUT_POST, FILTER_UNSAFE_RAW) ?: [])
 			: (empty($_POST) ? [] : $_POST);
 		$cookies = $useFilter
-			? filter_input_array(INPUT_COOKIE, FILTER_UNSAFE_RAW)
+			? (filter_input_array(INPUT_COOKIE, FILTER_UNSAFE_RAW) ?: [])
 			: (empty($_COOKIE) ? [] : $_COOKIE);
 
 		// remove invalid characters
-		$reChars = '#^[' . self::ValidChars . ']*+$#Du';
 		if (!$this->binary) {
-			$list = [&$query, &$post, &$cookies];
-			foreach ($list as $key => &$val) {
-				foreach ($val as $k => $v) {
-					if (is_string($k) && (!preg_match($reChars, $k) || preg_last_error())) {
-						unset($list[$key][$k]);
-
-					} elseif (is_array($v)) {
-						$list[$key][$k] = $v;
-						$list[] = &$list[$key][$k];
-
-					} elseif (is_string($v)) {
-						$list[$key][$k] = (string) preg_replace('#[^' . self::ValidChars . ']+#u', '', $v);
-
-					} else {
-						throw new Nette\InvalidStateException(sprintf('Invalid value in $_POST/$_COOKIE in key %s, expected string, %s given.', "'$k'", get_debug_type($v)));
-					}
-				}
-			}
-
-			unset($list, $key, $val, $k, $v);
+			$query = self::sanitize($query);
+			$post = self::sanitize($post);
+			$cookies = self::sanitize($cookies);
 		}
 
 		$url->setQuery($query);
 		return [$post, $cookies];
+	}
+
+
+	/**
+	 * Removes invalid UTF-8 and control characters from keys and values.
+	 * @param  mixed[]  $data
+	 * @return mixed[]
+	 */
+	private static function sanitize(array $data): array
+	{
+		foreach ($data as $k => $v) {
+			if (is_string($k) && !self::isClean($k) && (!preg_match('#^[' . self::ValidChars . ']*+$#Du', $k) || preg_last_error())) {
+				unset($data[$k]);
+
+			} elseif (is_array($v)) {
+				$data[$k] = self::sanitize($v);
+
+			} elseif (is_string($v)) {
+				if (!self::isClean($v)) {
+					$data[$k] = (string) preg_replace('#[^' . self::ValidChars . ']+#u', '', $v);
+				}
+
+			} else {
+				throw new Nette\InvalidStateException(sprintf('Invalid value in $_POST/$_COOKIE in key %s, expected string, %s given.', "'$k'", get_debug_type($v)));
+			}
+		}
+
+		return $data;
+	}
+
+
+	/** Fast path: pure printable ASCII needs no regex (locale independent, unlike ctype_print). */
+	private static function isClean(string $s): bool
+	{
+		return strspn($s, self::AsciiPrintable) === strlen($s);
 	}
 
 
@@ -330,6 +361,10 @@ class RequestFactory
 	private function getClient(Url $url): ?string
 	{
 		$remoteAddr = !empty($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : null;
+
+		if (!$this->proxies) {
+			return $remoteAddr;
+		}
 
 		// trust forwarding headers only when the request comes through a trusted proxy;
 		// the proxy in turn should strip any forwarding header it does not set itself
