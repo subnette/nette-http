@@ -380,7 +380,6 @@ class Session
 	public function setOptions(array $options): static
 	{
 		$normalized = [];
-		$allowed = ini_get_all('session', details: false) + ['session.read_and_close' => 1];
 
 		foreach ($options as $key => $value) {
 			if (!strncmp($key, 'session.', 8)) { // back compatibility
@@ -389,7 +388,8 @@ class Session
 
 			$normKey = strtolower(preg_replace('#(.)(?=[A-Z])#', '$1_', $key)); // camelCase -> snake_case
 
-			if (!isset($allowed["session.$normKey"])) {
+			if ($normKey !== 'read_and_close' && ini_get("session.$normKey") === false) { // cheap lookup; ini_get_all() costs ~9 us
+				$allowed = ini_get_all('session', details: false) + ['session.read_and_close' => 1];
 				$hint = substr((string) Nette\Utils\Helpers::getSuggestion(array_keys($allowed), "session.$normKey"), 8);
 				if ($key !== $normKey) {
 					$hint = preg_replace_callback('#_(.)#', fn($m) => strtoupper($m[1]), $hint); // snake_case -> camelCase

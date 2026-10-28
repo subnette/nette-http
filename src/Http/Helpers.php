@@ -9,7 +9,7 @@ namespace Nette\Http;
 
 use Nette;
 use Nette\Utils\DateTime;
-use function is_int;
+use function gmdate, is_int, time;
 
 
 /**
@@ -25,6 +25,10 @@ final class Helpers
 	 */
 	public static function formatDate(string|int|\DateTimeInterface $time): string
 	{
+		if (is_int($time)) { // fast path, same semantics as DateTime::from(): small numbers are relative to now
+			return gmdate('D, d M Y H:i:s \G\M\T', $time <= DateTime::YEAR ? $time + time() : $time);
+		}
+
 		$time = DateTime::from($time)->setTimezone(new \DateTimeZone('GMT'));
 		return $time->format('D, d M Y H:i:s \G\M\T');
 	}

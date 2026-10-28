@@ -8,7 +8,7 @@
 namespace Nette\Http;
 
 use Nette;
-use function is_int, strlen;
+use function is_int, strlen, strpbrk;
 use const PHP_SAPI;
 
 
@@ -245,9 +245,9 @@ final class Response implements IResponse
 			$path ?? ($domain === null ? $this->cookiePath : '/'),
 			$domain ?? ($path === null ? $this->cookieDomain : ''),
 		];
-		if ($name === '' || preg_match('#[=,; \t\r\n\x0B\x0C]#', $name)) {
+		if ($name === '' || strpbrk($name, "=,; \t\r\n\x0B\x0C") !== false) {
 			throw new Nette\InvalidArgumentException("Cookie name must not be empty or contain '=', ',', ';', whitespace or control characters, '$name' given.");
-		} elseif (preg_match('#[,; \t\r\n\x0B\x0C]#', $path . $domain . $sameSite)) {
+		} elseif (strpbrk($path . $domain . $sameSite, ",; \t\r\n\x0B\x0C") !== false) {
 			throw new Nette\InvalidArgumentException("Cookie path, domain and sameSite must not contain ',', ';', whitespace or control characters.");
 		} elseif ($expire === 0) { // BC: 0 used to mean a session cookie
 			trigger_error('Passing 0 as $expire is deprecated; use null for a session cookie.', E_USER_DEPRECATED);
